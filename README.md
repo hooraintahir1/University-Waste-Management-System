@@ -4,15 +4,6 @@ A full-stack web application to digitize and streamline waste management operati
 
 ---
 
-## 👥 Team Members
-
-| Name | Role |
-|------|------|
-| Momina Qayyum | Backend API + Database Design + Documentation |
-| Hoorain Tahir | Frontend + UI/UX + Transactions |
-
----
-
 ## 🧰 Tech Stack
 
 ### Frontend
