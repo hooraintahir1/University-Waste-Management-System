@@ -1,0 +1,551 @@
+openapi: 3.0.0
+info:
+  title: University Waste Management System API
+  version: 1.0.0
+  description: >
+    REST API for Group 2 — University Waste Management System.
+    Covers authentication, workers, dustbins, waste collections,
+    maintenance, salary, and leave management.
+    All protected endpoints require a Bearer JWT token.
+
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Local development server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string, example: Access denied }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, example: ali.manager }
+        password: { type: string, example: manager123 }
+
+    LoginResponse:
+      type: object
+      properties:
+        message: { type: string, example: Login successful }
+        token:   { type: string }
+        user:
+          type: object
+          properties:
+            username: { type: string }
+            role:     { type: string, enum: [Manager, Admin, Cleaner] }
+
+    Worker:
+      type: object
+      properties:
+        worker_id:         { type: integer }
+        name:              { type: string }
+        CNIC:              { type: string }
+        phone:             { type: string }
+        hire_date:         { type: string, format: date }
+        worker_type:       { type: string }
+        employment_status: { type: string }
+        campus_name:       { type: string }
+
+    Dustbin:
+      type: object
+      properties:
+        dustbin_id:        { type: integer }
+        capacity:          { type: integer }
+        current_fill_level:{ type: integer }
+        last_emptied_date: { type: string, format: date }
+        bin_type:          { type: string }
+        status:            { type: string }
+        building_name:     { type: string }
+        campus_name:       { type: string }
+
+    WasteCollection:
+      type: object
+      properties:
+        collection_id:   { type: integer }
+        dustbin_id:      { type: integer }
+        worker_id:       { type: integer }
+        worker_name:     { type: string }
+        collection_date: { type: string, format: date }
+        collection_time: { type: string }
+        waste_weight:    { type: number }
+        remarks:         { type: string }
+
+    MaintenanceRequest:
+      type: object
+      properties:
+        maintenance_id:    { type: integer }
+        dustbin_id:        { type: integer }
+        maintenance_date:  { type: string, format: date }
+        issue_description: { type: string }
+        status_name:       { type: string }
+        reported_by:       { type: string }
+
+    SalaryPayment:
+      type: object
+      properties:
+        payment_id:     { type: integer }
+        worker_id:      { type: integer }
+        worker_name:    { type: string }
+        month:          { type: integer }
+        year:           { type: integer }
+        payment_date:   { type: string, format: date }
+        payment_status: { type: string }
+
+    LeaveRequest:
+      type: object
+      properties:
+        leave_id:         { type: integer }
+        worker_id:        { type: integer }
+        worker_name:      { type: string }
+        leave_start_date: { type: string, format: date }
+        leave_end_date:   { type: string, format: date }
+        leave_type:       { type: string }
+        leave_status:     { type: string }
+        reason:           { type: string }
+
+security:
+  - BearerAuth: []
+
+paths:
+
+  # ── AUTH ──────────────────────────────────────────────────────────────────
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and receive JWT token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+            example:
+              username: ali.manager
+              password: manager123
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '400': { description: Missing fields }
+        '401': { description: Invalid credentials }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new system user — Manager only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, role]
+              properties:
+                username:  { type: string,  example: new.admin }
+                password:  { type: string,  example: pass1234 }
+                role:      { type: string,  enum: [Manager, Admin, Cleaner] }
+                worker_id: { type: integer, example: 5 }
+      responses:
+        '201': { description: User registered successfully }
+        '400': { description: Validation error }
+        '403': { description: Access denied }
+        '409': { description: Username already exists }
+
+  # ── WORKERS ───────────────────────────────────────────────────────────────
+  /workers:
+    get:
+      tags: [Workers]
+      summary: Get all workers — Manager, Admin
+      responses:
+        '200':
+          description: List of workers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Worker' }
+        '403': { description: Access denied }
+
+    post:
+      tags: [Workers]
+      summary: Create worker + user account atomically (transaction) — Manager only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [campus_id, name, CNIC, worker_type_id, username, password]
+              properties:
+                campus_id:      { type: integer, example: 1 }
+                name:           { type: string,  example: Kamran Ali }
+                CNIC:           { type: string,  example: 35201-8888888-8 }
+                phone:          { type: string,  example: '03001234999' }
+                hire_date:      { type: string,  format: date }
+                worker_type_id: { type: integer, example: 3 }
+                username:       { type: string,  example: kamran.cleaner }
+                password:       { type: string,  example: pass1234 }
+      responses:
+        '201': { description: Worker and user account created }
+        '400': { description: Missing required fields }
+        '403': { description: Access denied }
+        '409': { description: Duplicate CNIC or username }
+
+  /workers/{id}:
+    get:
+      tags: [Workers]
+      summary: Get worker by ID — Manager, Admin
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Worker' }
+        '404': { description: Worker not found }
+
+    put:
+      tags: [Workers]
+      summary: Update worker details — Manager, Admin
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:                 { type: string }
+                phone:                { type: string }
+                employment_status_id: { type: integer }
+      responses:
+        '200': { description: Worker updated }
+        '404': { description: Worker not found }
+
+    delete:
+      tags: [Workers]
+      summary: Delete worker — Manager only
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: Worker deleted }
+        '403': { description: Access denied }
+        '404': { description: Worker not found }
+
+  # ── DUSTBINS ──────────────────────────────────────────────────────────────
+  /dustbins:
+    get:
+      tags: [Dustbins]
+      summary: Get all dustbins — All roles
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Dustbin' }
+
+    post:
+      tags: [Dustbins]
+      summary: Create a new dustbin — Manager, Admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [building_id, bin_type_id, capacity]
+              properties:
+                building_id:       { type: integer, example: 1 }
+                bin_type_id:       { type: integer, example: 1 }
+                capacity:          { type: integer, example: 120 }
+                current_fill_level:{ type: integer, example: 0 }
+                dustbin_status_id: { type: integer, example: 1 }
+      responses:
+        '201': { description: Dustbin created }
+        '400': { description: Missing fields }
+
+  /dustbins/full:
+    get:
+      tags: [Dustbins]
+      summary: Get dustbins at or above 80% fill — All roles
+      responses:
+        '200': { description: Full dustbins list }
+
+  /dustbins/{id}:
+    put:
+      tags: [Dustbins]
+      summary: Update dustbin fill level or status — Manager, Admin
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                current_fill_level: { type: integer, example: 50 }
+                dustbin_status_id:  { type: integer, example: 3 }
+      responses:
+        '200': { description: Updated }
+        '404': { description: Not found }
+
+  # ── WASTE COLLECTIONS ────────────────────────────────────────────────────
+  /waste-collections:
+    get:
+      tags: [Waste Collections]
+      summary: Get all waste collection records — All roles
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/WasteCollection' }
+
+    post:
+      tags: [Waste Collections]
+      summary: Record waste collection — uses transaction — All roles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dustbin_id, worker_id, collection_date, waste_weight]
+              properties:
+                dustbin_id:      { type: integer, example: 1 }
+                worker_id:       { type: integer, example: 3 }
+                collection_date: { type: string, format: date, example: '2026-03-10' }
+                collection_time: { type: string, example: '10:00:00' }
+                waste_weight:    { type: number,  example: 45.5 }
+                remarks:         { type: string,  example: Normal collection }
+      responses:
+        '201': { description: Collection recorded }
+        '400': { description: Missing fields }
+        '500': { description: Dustbin not found or DB error }
+
+  /waste-collections/report:
+    get:
+      tags: [Waste Collections]
+      summary: Collection report by dustbin and date range — Manager, Admin
+      parameters:
+        - in: query
+          name: dustbin_id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: from
+          required: true
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: Report data }
+        '400': { description: Missing query params }
+
+  # ── MAINTENANCE ───────────────────────────────────────────────────────────
+  /maintenance:
+    get:
+      tags: [Maintenance]
+      summary: Get all maintenance requests — Manager, Admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MaintenanceRequest' }
+
+    post:
+      tags: [Maintenance]
+      summary: Submit a maintenance request — All roles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dustbin_id, worker_id, issue_description]
+              properties:
+                dustbin_id:        { type: integer, example: 2 }
+                worker_id:         { type: integer, example: 3 }
+                maintenance_date:  { type: string, format: date }
+                issue_description: { type: string, example: Broken lid }
+      responses:
+        '201': { description: Maintenance request created }
+        '400': { description: Missing fields }
+
+  /maintenance/pending:
+    get:
+      tags: [Maintenance]
+      summary: Get pending and in-progress requests — All roles
+      responses:
+        '200': { description: Pending maintenance list }
+
+  /maintenance/{id}:
+    put:
+      tags: [Maintenance]
+      summary: Update maintenance request status — Manager, Admin
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [maintenance_status_id]
+              properties:
+                maintenance_status_id: { type: integer, example: 3, description: "1=Pending 2=InProgress 3=Resolved" }
+      responses:
+        '200': { description: Status updated }
+        '404': { description: Not found }
+
+  # ── SALARY ────────────────────────────────────────────────────────────────
+  /salary:
+    get:
+      tags: [Salary]
+      summary: Get all salary payments — Manager only
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SalaryPayment' }
+
+    post:
+      tags: [Salary]
+      summary: Process salary with components atomically (transaction) — Manager only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [worker_id, month, year, components]
+              properties:
+                worker_id:    { type: integer, example: 3 }
+                month:        { type: integer, example: 3 }
+                year:         { type: integer, example: 2026 }
+                payment_date: { type: string, format: date }
+                components:
+                  type: array
+                  items:
+                    type: object
+                    required: [component_type, amount]
+                    properties:
+                      component_type: { type: string,  example: Basic }
+                      amount:         { type: number,  example: 30000 }
+            example:
+              worker_id: 3
+              month: 3
+              year: 2026
+              components:
+                - { component_type: Basic,     amount: 30000 }
+                - { component_type: Bonus,     amount: 1500  }
+                - { component_type: Deduction, amount: 500   }
+      responses:
+        '201': { description: Salary payment recorded }
+        '400': { description: Already paid or invalid input }
+        '403': { description: Access denied }
+
+  /salary/worker/{id}:
+    get:
+      tags: [Salary]
+      summary: Get salary history for a specific worker — Manager, Admin
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: year
+          schema: { type: integer, example: 2026 }
+      responses:
+        '200': { description: Worker salary records }
+
+  # ── LEAVE ─────────────────────────────────────────────────────────────────
+  /leave:
+    get:
+      tags: [Leave]
+      summary: Get all leave requests — Manager, Admin
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LeaveRequest' }
+
+    post:
+      tags: [Leave]
+      summary: Submit a leave request — All roles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [worker_id, leave_start_date, leave_end_date, leave_type_id]
+              properties:
+                worker_id:        { type: integer, example: 3 }
+                leave_start_date: { type: string, format: date, example: '2026-04-01' }
+                leave_end_date:   { type: string, format: date, example: '2026-04-03' }
+                leave_type_id:    { type: integer, example: 1 }
+                reason:           { type: string,  example: Family event }
+      responses:
+        '201': { description: Leave request submitted }
+        '400': { description: Invalid date range or missing fields }
+
+  /leave/{id}/approve:
+    put:
+      tags: [Leave]
+      summary: Approve or reject a leave request — Manager only
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leave_status_id]
+              properties:
+                leave_status_id: { type: integer, example: 1, description: "1=Approved 3=Rejected" }
+      responses:
+        '200': { description: Leave request updated }
+        '403': { description: Access denied }
+        '404': { description: Leave request not found }
